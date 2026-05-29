@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ORB1T - Space Survival</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: monospace;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #game-viewport {
+            position: relative;
+            display: inline-block;
+        }
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            color: #fff;
+            font-size: 14px;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+            padding: 20px;
+        }
+        #controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            color: #fff;
+            font-size: 12px;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="hud">
+        <div>ORB1T v0.1</div>
+        <div id="position">Position: (0, 0, 0)</div>
+        <div id="climate">Climate: Stone</div>
+    </div>
+    <div id="controls">
+        <div>Arrow Keys: Move | W: Jump | R: Shoot | Q: Place Marker | E: Rotate Camera</div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
