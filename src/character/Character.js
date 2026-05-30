@@ -16,9 +16,9 @@ class Character {
     this.jumpForce = 12.0; // Higher jump force for more responsive jumping
     this.moveSpeed = 10.0;
     this.isGrounded = false;
-    this.characterHeight = 1.0; // Total character height (scaled) - increased for better clearance
-    this.maxClimbSlope = 2.5; // Maximum height difference per unit distance - more lenient
-    this.maxStepHeight = 1.2; // Allow climbing larger steps
+    this.characterHeight = 1.0; // Total character height (scaled)
+    this.maxClimbSlope = 0.8; // Maximum slope - stricter for clearer boundaries
+    this.maxStepHeight = 0.5; // Maximum step height - prevents sudden teleporting up cliffs
     
     // Shooting properties
     this.lastShotTime = 0;
@@ -41,6 +41,20 @@ class Character {
     // Simple character model - blocky 1-bit style
     const group = new THREE.Group();
     const scale = 0.4; // Make character smaller
+    
+    // Ground indicator circle (shows where character is positioned)
+    const groundIndicatorGeometry = new THREE.CircleGeometry(0.4 * scale, 16);
+    const groundIndicatorMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0x000000, 
+      opacity: 0.5,
+      transparent: true,
+      depthWrite: false
+    });
+    const groundIndicator = new THREE.Mesh(groundIndicatorGeometry, groundIndicatorMaterial);
+    groundIndicator.rotation.x = -Math.PI / 2; // Lay flat on ground
+    groundIndicator.position.y = -this.characterHeight * 0.5 + 0.01; // At character's feet
+    group.add(groundIndicator);
+    this.groundIndicator = groundIndicator;
     
     // Body
     const bodyGeometry = new THREE.BoxGeometry(0.8 * scale, 1.6 * scale, 0.6 * scale);
@@ -220,41 +234,64 @@ class Character {
     // Update projectiles
     this.updateProjectiles(deltaTime);
     
-    // Update position with slope checking
+    // Store original position for collision detection
+    const originalPos = this.position.clone();
+    
+    // Calculate next position
     const nextPosition = this.position.clone().add(this.velocity.clone().multiplyScalar(deltaTime));
     
-    // Check slope at next position
-    const currentHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
-    const nextHeight = this.terrain.getTerrainHeight(nextPosition.x, nextPosition.z);
-    const heightDiff = nextHeight - currentHeight;
-    const horizontalDist = Math.sqrt(
-      Math.pow(nextPosition.x - this.position.x, 2) + 
-      Math.pow(nextPosition.z - this.position.z, 2)
-    );
+    // Get current ground height
+    const currentGroundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
     
-    // Calculate slope (avoid division by very small numbers)
-    const slope = horizontalDist > 0.01 ? Math.abs(heightDiff) / horizontalDist : 0;
+    // Only check horizontal movement if grounded and moving horizontally
+    let canMoveHorizontally = true;
     
-    // More lenient movement - allow if jumping, airborne, or reasonable slope/step
-    const canMove = !this.isGrounded || 
-                    slope <= this.maxClimbSlope || 
-                    (this.isGrounded && Math.abs(heightDiff) <= this.maxStepHeight);
-    
-    if (canMove) {
-      this.position.copy(nextPosition);
-    } else {
-      // Can't climb steep cliff - stop horizontal movement but allow sliding
-      this.velocity.x *= 0.3;
-      this.velocity.z *= 0.3;
+    if (this.isGrounded && (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.z) > 0.1)) {
+      // Check terrain at next position
+      const nextGroundHeight = this.terrain.getTerrainHeight(nextPosition.x, nextPosition.z);
+      const heightDiff = nextGroundHeight - currentGroundHeight;
+      
+      // Calculate horizontal distance
+      const horizontalDist = Math.sqrt(
+        Math.pow(nextPosition.x - this.position.x, 2) + 
+        Math.pow(nextPosition.z - this.position.z, 2)
+      );
+      
+      // Calculate slope (avoid division by very small numbers)
+      const slope = horizontalDist > 0.01 ? Math.abs(heightDiff) / horizontalDist : 0;
+      
+      // Check if we're going UP a cliff (can't climb steep slopes)
+      if (heightDiff > 0 && slope > this.maxClimbSlope) {
+        canMoveHorizontally = false;
+        // Completely stop horizontal movement when hitting a cliff
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+      }
+      // Check if we're going DOWN a cliff (can't walk off steep edges)
+      else if (heightDiff < -this.maxStepHeight && slope > this.maxClimbSlope) {
+        canMoveHorizontally = false;
+        // Completely stop horizontal movement at cliff edge
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+      }
     }
     
-    // Ground collision (no water check)
-    const groundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
-    const targetHeight = groundHeight;
+    // Apply horizontal movement if allowed
+    if (canMoveHorizontally || !this.isGrounded) {
+      this.position.x = nextPosition.x;
+      this.position.z = nextPosition.z;
+    }
     
-    // Keep character above ground by its height
-    if (this.position.y <= targetHeight + this.characterHeight) {
-      this.position.y = targetHeight + this.characterHeight;
+    // Apply vertical movement (gravity/jumping)
+    this.position.y += this.velocity.y * deltaTime;
+    
+    // Ground collision - snap character to terrain
+    const groundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
+    const characterBottomY = groundHeight + 0.05; // Small offset above ground for visual clarity
+    
+    // If character is at or below ground level, snap to ground
+    if (this.position.y - this.characterHeight * 0.5 <= characterBottomY) {
+      this.position.y = characterBottomY + this.characterHeight * 0.5; // Position at center of character
       this.velocity.y = 0;
       this.isGrounded = true;
     } else {
@@ -266,7 +303,15 @@ class Character {
     this.position.x = Math.max(-maxBound, Math.min(maxBound, this.position.x));
     this.position.z = Math.max(-maxBound, Math.min(maxBound, this.position.z));
     
+    // Update mesh position
     this.mesh.position.copy(this.position);
+    
+    // Update ground indicator to always sit on terrain
+    if (this.groundIndicator) {
+      const groundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
+      const indicatorOffset = groundHeight - this.position.y + 0.02;
+      this.groundIndicator.position.y = indicatorOffset;
+    }
   }
   
   updateProjectiles(deltaTime) {
