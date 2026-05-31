@@ -12,7 +12,12 @@
         }
         body {
             overflow: hidden;
-            background: #000;
+            background-color: #02030a;
+            background-image:
+                radial-gradient(circle at 18% 16%, rgba(255, 255, 255, 0.18) 0 1px, transparent 1.5px),
+                radial-gradient(circle at 72% 22%, rgba(174, 203, 255, 0.2) 0 1px, transparent 1.5px),
+                radial-gradient(circle at 82% 74%, rgba(255, 226, 168, 0.14) 0 1px, transparent 1.5px),
+                linear-gradient(180deg, #060814 0%, #090d1b 42%, #030409 100%);
             font-family: monospace;
         }
         #canvas-container {
@@ -23,6 +28,10 @@
         #game-viewport {
             position: relative;
             display: inline-block;
+            background:
+                radial-gradient(circle at 74% 20%, rgba(92, 114, 163, 0.35) 0, rgba(92, 114, 163, 0.35) 8%, transparent 8.5%),
+                linear-gradient(180deg, rgba(9, 12, 24, 0.98) 0%, rgba(6, 8, 18, 0.92) 52%, rgba(2, 3, 8, 0.98) 100%);
+            box-shadow: 0 0 0 3px #ffffff, 0 0 0 6px #0b1223;
         }
         #hud {
             position: absolute;
@@ -33,6 +42,7 @@
             text-shadow: 2px 2px 0 #000;
             pointer-events: none;
             padding: 20px;
+            letter-spacing: 0.08em;
         }
         #controls {
             position: absolute;
@@ -43,6 +53,7 @@
             text-shadow: 2px 2px 0 #000;
             pointer-events: none;
             padding: 20px;
+            letter-spacing: 0.08em;
         }
     </style>
 </head>

@@ -55,6 +55,31 @@ export const OneBitShader = {
       
       return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
     }
+
+    float arcticLakeBlend(vec2 worldPos) {
+      vec2 chunkCoord = floor(worldPos / 50.0);
+      vec2 chunkOrigin = chunkCoord * 50.0;
+      float centerOffsetX = noise(chunkCoord * vec2(4.7, 6.1) + vec2(18.2, -11.4));
+      float centerOffsetZ = noise(chunkCoord * vec2(5.3, 4.9) + vec2(-7.9, 22.6));
+      vec2 lakeCenter = chunkOrigin + 50.0 * (vec2(0.42) + vec2(centerOffsetX, centerOffsetZ) * 0.16);
+      float radiusNoise = noise(chunkCoord * vec2(8.3, 7.7) + vec2(3.1, -5.2));
+      float baseRadius = 0.14 + radiusNoise * 0.08;
+      float shorelineNoise = noise(worldPos * 0.12 + chunkCoord * vec2(13.0, -9.0));
+      float shorelineRadius = baseRadius * mix(0.88, 1.08, shorelineNoise);
+      float distanceToCenter = distance(worldPos, lakeCenter);
+      float guaranteedLakeMask = 1.0 - smoothstep(shorelineRadius * 0.35, shorelineRadius, distanceToCenter);
+
+      float moisture = noise(worldPos * 0.003 + vec2(81.0, 17.0));
+      float basin = noise((worldPos + vec2(-220.0, 340.0)) * 0.018);
+      float shelf = noise((worldPos + vec2(140.0, -170.0)) * 0.04);
+      float moistureMask = smoothstep(0.18, 0.66, moisture);
+      float basinMask = smoothstep(0.34, 0.72, basin);
+      float shelfMask = 1.0 - smoothstep(0.68, 0.94, shelf);
+      float lowElevationMask = 1.0 - smoothstep(0.52, 0.92, vElevation);
+      float naturalLakeMask = moistureMask * basinMask * shelfMask * lowElevationMask;
+
+      return max(guaranteedLakeMask * lowElevationMask, naturalLakeMask * 0.12);
+    }
     
     void main() {
       // Calculate lighting
@@ -190,16 +215,22 @@ export const OneBitShader = {
         bit = mix(bit, bit * (1.0 - hatch * hatchStrength), 0.8);
       }
       
-      // Climate-based tinting (subtle)
-      vec3 color = vec3(bit);
+      // Map terrain into a narrower grey palette so the base reads as grey and shadows stay darker grey.
+      vec3 darkGrey = vec3(0.28, 0.28, 0.3);
+      vec3 lightGrey = vec3(0.66, 0.66, 0.68);
+      vec3 color = mix(darkGrey, lightGrey, bit);
       if (climateType == 0) {
         // Arctic - slightly blue tint
-        color = vec3(bit * 0.9, bit * 0.95, bit);
+        color *= vec3(0.94, 0.97, 1.0);
+
+        float lakeBlend = arcticLakeBlend(vWorldPosition.xz);
+        float shoreBand = smoothstep(0.16, 0.34, lakeBlend) * (1.0 - smoothstep(0.34, 0.58, lakeBlend));
+        color = mix(color, vec3(0.86, 0.92, 1.0), shoreBand * 0.75);
       } else if (climateType == 1) {
         // Tropical - slightly green tint
-        color = vec3(bit * 0.9, bit, bit * 0.9);
+        color *= vec3(0.93, 0.98, 0.93);
       }
-      // Stone keeps pure black/white
+      // Stone keeps neutral greys.
       
       gl_FragColor = vec4(color, 1.0);
     }
@@ -209,12 +240,10 @@ export const OneBitShader = {
 export const WaterShader = {
   vertexShader: `
     varying vec2 vUv;
-    varying vec3 vPosition;
     uniform float time;
     
     void main() {
       vUv = uv;
-      vPosition = position;
       
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
@@ -223,24 +252,37 @@ export const WaterShader = {
   fragmentShader: `
     uniform float time;
     varying vec2 vUv;
-    varying vec3 vPosition;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+    }
+
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+
+      float a = hash(i);
+      float b = hash(i + vec2(1.0, 0.0));
+      float c = hash(i + vec2(0.0, 1.0));
+      float d = hash(i + vec2(1.0, 1.0));
+
+      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
     
     void main() {
-      // Create small wave tildes moving across the surface
-      float wave1 = sin(vUv.x * 40.0 + time * 2.0) * 0.5 + 0.5;
-      float wave2 = sin(vUv.y * 40.0 - time * 1.5) * 0.5 + 0.5;
-      float wave3 = sin((vUv.x + vUv.y) * 30.0 + time * 3.0) * 0.5 + 0.5;
-      
-      // Combine waves
-      float waves = (wave1 + wave2 + wave3) / 3.0;
-      
-      // Create tilde pattern (1-bit style)
-      float pattern = step(0.7, waves);
-      
-      // Black water with white tildes
-      vec3 color = vec3(pattern);
-      
-      gl_FragColor = vec4(color, 0.9);
+      vec2 flowUv = vUv * 18.0;
+      float ripple = noise(flowUv + vec2(time * 0.45, -time * 0.2));
+      float shimmer = noise(flowUv * 1.9 + vec2(-time * 0.7, time * 0.38));
+      float sparkles = step(0.84, ripple * 0.62 + shimmer * 0.38);
+      float bandSignal = sin((vUv.x + vUv.y) * 58.0 + time * 2.2) * 0.5 + 0.5;
+      float bands = (smoothstep(0.82, 0.86, bandSignal) - smoothstep(0.86, 0.9, bandSignal)) * 0.28;
+      float foam = clamp(sparkles + bands, 0.0, 1.0);
+
+      vec3 baseColor = vec3(0.12, 0.2, 0.28);
+      vec3 color = mix(baseColor, vec3(0.97, 0.99, 1.0), foam);
+
+      gl_FragColor = vec4(color, 0.98);
     }
   `
 };

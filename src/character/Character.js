@@ -15,14 +15,23 @@ class Character {
     this.gravity = -15.0; // Slightly stronger gravity for snappier feel
     this.jumpForce = 12.0; // Higher jump force for more responsive jumping
     this.moveSpeed = 10.0;
+    this.groundAcceleration = 68.0;
+    this.airAcceleration = 34.0;
+    this.groundDeceleration = 88.0;
+    this.airDrag = 6.0;
     this.isGrounded = false;
     this.characterHeight = 1.0; // Total character height (scaled)
     this.maxClimbSlope = 1.1; // Require a steeper grade before terrain blocks movement
     this.maxStepHeight = 0.5; // Maximum step height - prevents sudden teleporting up cliffs
+    this.jumpBufferDuration = 0.14;
+    this.jumpBufferTimer = 0;
+    this.coyoteDuration = 0.1;
+    this.coyoteTimer = 0;
+    this.jumpCutGravityMultiplier = 2.2;
     
     // Shooting properties
     this.lastShotTime = 0;
-    this.shootCooldown = 0.2; // Faster shooting (was 0.5)
+    this.shootCooldown = 0.12; // Faster shooting (was 0.5)
     this.projectiles = [];
     
     // Input state
@@ -38,8 +47,8 @@ class Character {
   }
 
   canTraverseTo(targetX, targetZ) {
-    const currentGroundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
-    const nextGroundHeight = this.terrain.getTerrainHeight(targetX, targetZ);
+    const currentGroundHeight = this.terrain.getWalkableHeight(this.position.x, this.position.z);
+    const nextGroundHeight = this.terrain.getWalkableHeight(targetX, targetZ);
     const heightDiff = nextGroundHeight - currentGroundHeight;
     const horizontalDist = Math.sqrt(
       Math.pow(targetX - this.position.x, 2) +
@@ -139,20 +148,44 @@ class Character {
       this.keys[e.code.toLowerCase()] = true;
       
       // Jump on W key
-      if (e.code === 'KeyW' && this.isGrounded) {
-        this.velocity.y = this.jumpForce;
-        this.isGrounded = false;
+      if (e.code === 'KeyW') {
+        this.jumpBufferTimer = this.jumpBufferDuration;
       }
       
       // Shoot on R key
       if (e.code === 'KeyR') {
+        this.mouseButtons.fire = true;
         this.shoot();
       }
     });
 
     document.addEventListener('keyup', (e) => {
       this.keys[e.code.toLowerCase()] = false;
+
+      if (e.code === 'KeyR') {
+        this.mouseButtons.fire = false;
+      }
     });
+  }
+
+  moveTowards(current, target, maxDelta) {
+    if (current < target) {
+      return Math.min(current + maxDelta, target);
+    }
+
+    return Math.max(current - maxDelta, target);
+  }
+
+  tryJump() {
+    if (this.jumpBufferTimer <= 0 || this.coyoteTimer <= 0) {
+      return false;
+    }
+
+    this.velocity.y = this.jumpForce;
+    this.isGrounded = false;
+    this.coyoteTimer = 0;
+    this.jumpBufferTimer = 0;
+    return true;
   }
 
   shoot() {
@@ -200,6 +233,15 @@ class Character {
    * Update character physics and position
    */
   update(deltaTime, cameraRotation) {
+    this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - deltaTime);
+    this.coyoteTimer = this.isGrounded
+      ? this.coyoteDuration
+      : Math.max(0, this.coyoteTimer - deltaTime);
+
+    if (!this.keys['keyw'] && this.velocity.y > 0) {
+      this.velocity.y += this.gravity * (this.jumpCutGravityMultiplier - 1) * deltaTime;
+    }
+
     // Apply gravity
     this.velocity.y += this.gravity * deltaTime;
     
@@ -240,15 +282,27 @@ class Character {
       moveDirection.x = rotatedX;
       moveDirection.z = rotatedZ;
       
-      this.velocity.x = moveDirection.x * this.moveSpeed;
-      this.velocity.z = moveDirection.z * this.moveSpeed;
+      const targetVelocityX = moveDirection.x * this.moveSpeed;
+      const targetVelocityZ = moveDirection.z * this.moveSpeed;
+      const acceleration = this.isGrounded ? this.groundAcceleration : this.airAcceleration;
+      const maxDelta = acceleration * deltaTime;
+
+      this.velocity.x = this.moveTowards(this.velocity.x, targetVelocityX, maxDelta);
+      this.velocity.z = this.moveTowards(this.velocity.z, targetVelocityZ, maxDelta);
       
       // Rotate character to face movement direction (in world space)
       const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
       this.mesh.rotation.y = targetRotation;
     } else {
-      this.velocity.x *= 0.8; // Friction
-      this.velocity.z *= 0.8;
+      const drag = (this.isGrounded ? this.groundDeceleration : this.airDrag) * deltaTime;
+      this.velocity.x = this.moveTowards(this.velocity.x, 0, drag);
+      this.velocity.z = this.moveTowards(this.velocity.z, 0, drag);
+    }
+
+    this.tryJump();
+
+    if (this.mouseButtons.fire) {
+      this.shoot();
     }
     
     // Update projectiles
@@ -291,7 +345,7 @@ class Character {
     this.position.y += this.velocity.y * deltaTime;
     
     // Ground collision - snap character to terrain
-    const groundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
+    const groundHeight = this.terrain.getWalkableHeight(this.position.x, this.position.z);
     const characterBottomY = groundHeight + 0.05; // Small offset above ground for visual clarity
     
     // If character is at or below ground level, snap to ground
@@ -299,6 +353,8 @@ class Character {
       this.position.y = characterBottomY + this.characterHeight * 0.5; // Position at center of character
       this.velocity.y = 0;
       this.isGrounded = true;
+      this.coyoteTimer = this.coyoteDuration;
+      this.tryJump();
     } else {
       this.isGrounded = false;
     }
@@ -313,7 +369,7 @@ class Character {
     
     // Update ground indicator to always sit on terrain
     if (this.groundIndicator) {
-      const groundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
+      const groundHeight = this.terrain.getWalkableHeight(this.position.x, this.position.z);
       const indicatorOffset = groundHeight - this.position.y + 0.02;
       this.groundIndicator.position.y = indicatorOffset;
     }

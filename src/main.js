@@ -19,6 +19,7 @@ class Game {
     this.minimap = null;
     this.markers = []; // Store placed markers
     this.sunLight = null;
+    this.spaceBackdrop = null;
     
     this.lastTime = 0;
     
@@ -29,8 +30,8 @@ class Game {
   init() {
     // Create scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x87CEEB); // Sky blue
-    this.scene.fog = new THREE.Fog(0x87CEEB, 50, 200);
+    this.scene.background = null;
+    this.scene.fog = new THREE.Fog(0x070912, 75, 240);
 
     // Create camera (perspective for 3D clarity)
     this.camera = new THREE.PerspectiveCamera(
@@ -41,12 +42,13 @@ class Game {
     );
 
     // Create renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: false }); // No AA for crisp 1-bit look
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true }); // No AA for crisp 1-bit look
     
     // Make viewport horizontal rectangle at 90% of window
     const viewportWidth = window.innerWidth * 0.9;
     const viewportHeight = viewportWidth * (9 / 16); // 16:9 aspect ratio
     this.renderer.setSize(viewportWidth, viewportHeight);
+    this.renderer.setClearColor(0x000000, 0);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.BasicShadowMap; // Hard shadows for 1-bit style
     
@@ -83,6 +85,9 @@ class Game {
     // Add lighting
     this.setupLighting();
 
+    // Add distant celestial backdrop
+    this.createSpaceBackdrop();
+
     // Create character (pass camera for screen-relative movement)
     this.character = new Character(this.scene, this.terrain, this.camera);
 
@@ -104,11 +109,11 @@ class Game {
 
   setupLighting() {
     // Ambient light for overall illumination
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+    const ambientLight = new THREE.AmbientLight(0x9ba8c7, 0.22);
     this.scene.add(ambientLight);
 
     // Directional light (sun) for shadows
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    this.sunLight = new THREE.DirectionalLight(0xe8f0ff, 1.08);
     this.sunLight.position.set(90, 55, 45);
     this.sunLight.target.position.set(0, 0, 0);
     this.sunLight.castShadow = true;
@@ -126,6 +131,96 @@ class Game {
     if (this.terrain) {
       this.terrain.setLightDirection(this.getSunLightDirection());
     }
+  }
+
+  createSpaceBackdrop() {
+    const backdrop = new THREE.Group();
+
+    const starCount = 420;
+    const starPositions = new Float32Array(starCount * 3);
+    const starColors = new Float32Array(starCount * 3);
+    const starColorChoices = [
+      new THREE.Color(0xffffff),
+      new THREE.Color(0xaecbff),
+      new THREE.Color(0xffe2a8)
+    ];
+
+    for (let index = 0; index < starCount; index++) {
+      const radius = 260 + Math.random() * 120;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI * 0.45 + Math.PI * 0.12;
+      const offset = index * 3;
+
+      starPositions[offset] = Math.cos(theta) * Math.sin(phi) * radius;
+      starPositions[offset + 1] = Math.cos(phi) * radius + 55;
+      starPositions[offset + 2] = Math.sin(theta) * Math.sin(phi) * radius;
+
+      const starColor = starColorChoices[index % starColorChoices.length];
+      starColors[offset] = starColor.r;
+      starColors[offset + 1] = starColor.g;
+      starColors[offset + 2] = starColor.b;
+    }
+
+    const starGeometry = new THREE.BufferGeometry();
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+
+    const starMaterial = new THREE.PointsMaterial({
+      size: 2.2,
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      fog: false
+    });
+
+    const stars = new THREE.Points(starGeometry, starMaterial);
+    backdrop.add(stars);
+
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(24, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0x2d4266, fog: false })
+    );
+    planet.position.set(-180, 120, -280);
+    backdrop.add(planet);
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(30, 42, 24),
+      new THREE.MeshBasicMaterial({
+        color: 0xa7b7d8,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.55,
+        fog: false
+      })
+    );
+    ring.position.copy(planet.position);
+    ring.rotation.x = Math.PI * 0.45;
+    ring.rotation.y = Math.PI * 0.2;
+    backdrop.add(ring);
+
+    const moon = new THREE.Mesh(
+      new THREE.SphereGeometry(10, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xd9dbe6, fog: false })
+    );
+    moon.position.set(165, 88, -220);
+    backdrop.add(moon);
+
+    this.spaceBackdrop = backdrop;
+    this.scene.add(backdrop);
+  }
+
+  updateSpaceBackdrop() {
+    if (!this.spaceBackdrop || !this.character) {
+      return;
+    }
+
+    this.spaceBackdrop.position.set(
+      this.character.position.x * 0.12,
+      0,
+      this.character.position.z * 0.12
+    );
   }
 
   getSunLightDirection() {
@@ -191,6 +286,7 @@ class Game {
         dt
       );
       this.cameraController.update(dt);
+      this.updateSpaceBackdrop();
       
       // Update minimap
       if (this.minimap) {
