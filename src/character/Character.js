@@ -17,7 +17,7 @@ class Character {
     this.moveSpeed = 10.0;
     this.isGrounded = false;
     this.characterHeight = 1.0; // Total character height (scaled)
-    this.maxClimbSlope = 0.8; // Maximum slope - stricter for clearer boundaries
+    this.maxClimbSlope = 1.1; // Require a steeper grade before terrain blocks movement
     this.maxStepHeight = 0.5; // Maximum step height - prevents sudden teleporting up cliffs
     
     // Shooting properties
@@ -35,6 +35,26 @@ class Character {
     
     // Setup input handlers
     this.setupInput();
+  }
+
+  canTraverseTo(targetX, targetZ) {
+    const currentGroundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
+    const nextGroundHeight = this.terrain.getTerrainHeight(targetX, targetZ);
+    const heightDiff = nextGroundHeight - currentGroundHeight;
+    const horizontalDist = Math.sqrt(
+      Math.pow(targetX - this.position.x, 2) +
+      Math.pow(targetZ - this.position.z, 2)
+    );
+
+    if (horizontalDist <= 0.01) {
+      return true;
+    }
+
+    const slope = Math.abs(heightDiff) / horizontalDist;
+    const uphillBlocked = heightDiff > this.maxStepHeight * 1.1 && slope > this.maxClimbSlope;
+    const downhillBlocked = heightDiff < -this.maxStepHeight * 1.2 && slope > this.maxClimbSlope * 1.1;
+
+    return !uphillBlocked && !downhillBlocked;
   }
 
   createMesh() {
@@ -240,44 +260,29 @@ class Character {
     // Calculate next position
     const nextPosition = this.position.clone().add(this.velocity.clone().multiplyScalar(deltaTime));
     
-    // Get current ground height
-    const currentGroundHeight = this.terrain.getTerrainHeight(this.position.x, this.position.z);
-    
-    // Only check horizontal movement if grounded and moving horizontally
-    let canMoveHorizontally = true;
-    
     if (this.isGrounded && (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.z) > 0.1)) {
-      // Check terrain at next position
-      const nextGroundHeight = this.terrain.getTerrainHeight(nextPosition.x, nextPosition.z);
-      const heightDiff = nextGroundHeight - currentGroundHeight;
-      
-      // Calculate horizontal distance
-      const horizontalDist = Math.sqrt(
-        Math.pow(nextPosition.x - this.position.x, 2) + 
-        Math.pow(nextPosition.z - this.position.z, 2)
-      );
-      
-      // Calculate slope (avoid division by very small numbers)
-      const slope = horizontalDist > 0.01 ? Math.abs(heightDiff) / horizontalDist : 0;
-      
-      // Check if we're going UP a cliff (can't climb steep slopes)
-      if (heightDiff > 0 && slope > this.maxClimbSlope) {
-        canMoveHorizontally = false;
-        // Completely stop horizontal movement when hitting a cliff
-        this.velocity.x = 0;
-        this.velocity.z = 0;
+      const canMoveFully = this.canTraverseTo(nextPosition.x, nextPosition.z);
+
+      if (canMoveFully) {
+        this.position.x = nextPosition.x;
+        this.position.z = nextPosition.z;
+      } else {
+        const canMoveX = this.canTraverseTo(nextPosition.x, this.position.z);
+        const canMoveZ = this.canTraverseTo(this.position.x, nextPosition.z);
+
+        if (canMoveX) {
+          this.position.x = nextPosition.x;
+        } else {
+          this.velocity.x = 0;
+        }
+
+        if (canMoveZ) {
+          this.position.z = nextPosition.z;
+        } else {
+          this.velocity.z = 0;
+        }
       }
-      // Check if we're going DOWN a cliff (can't walk off steep edges)
-      else if (heightDiff < -this.maxStepHeight && slope > this.maxClimbSlope) {
-        canMoveHorizontally = false;
-        // Completely stop horizontal movement at cliff edge
-        this.velocity.x = 0;
-        this.velocity.z = 0;
-      }
-    }
-    
-    // Apply horizontal movement if allowed
-    if (canMoveHorizontally || !this.isGrounded) {
+    } else {
       this.position.x = nextPosition.x;
       this.position.z = nextPosition.z;
     }

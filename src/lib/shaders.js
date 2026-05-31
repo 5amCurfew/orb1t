@@ -63,6 +63,7 @@ export const OneBitShader = {
       
       // Calculate surface steepness (based on normal)
       float steepness = 1.0 - abs(vNormal.y);
+      float flatness = abs(vNormal.y);
       
       // Smoother lighting
       light = light * 0.5 + 0.5; // Remap from [-1,1] to [0,1]
@@ -76,16 +77,12 @@ export const OneBitShader = {
       float slopeShadow = 1.0 - (steepness * 0.3); // Cliffs are darker
       ao *= slopeShadow;
       
-      // 3. Fresnel/Rim lighting (edges catch more light)
-      vec3 viewDir = normalize(-vViewPosition);
-      float fresnel = pow(1.0 - abs(dot(viewDir, vNormal)), 2.0);
-      float rimLight = fresnel * 0.25; // Enhanced rim lighting
+      // 3. Ambient light term (prevents pure black shadows)
+      float ambient = 0.24;
       
-      // 4. Ambient light term (prevents pure black shadows)
-      float ambient = 0.2; // Slightly reduced for more contrast
-      
-      // 5. Combine lighting components
-      float finalLight = light * ao + ambient + rimLight;
+      // 4. Bias flatter ground brighter and cliff faces darker so terrain reads consistently.
+      float terrainShape = mix(0.72, 1.08, smoothstep(0.18, 0.95, flatness));
+      float finalLight = light * ao * terrainShape + ambient;
       finalLight = clamp(finalLight, 0.0, 1.0);
       
       // Base shading with enhanced lighting (maintaining gradient)
@@ -116,6 +113,13 @@ export const OneBitShader = {
         float edgeStrength = smoothstep(0.6, 0.85, steepness) * distanceFade;
         bit = mix(bit, 0.0, edgeLine * edgeStrength * 0.8);
       }
+
+      // Height contours give flat areas a readable sense of rise and fall.
+      float contourSpacing = 1.6;
+      float contourCoord = fract((vElevation + noise(vWorldPosition.xz * 0.25) * 0.18) / contourSpacing);
+      float contourLine = 1.0 - smoothstep(0.0, 0.06, min(contourCoord, 1.0 - contourCoord));
+      float contourStrength = smoothstep(0.15, 0.85, flatness) * distanceFade * 0.22;
+      bit = mix(bit, bit * (1.0 - contourLine * contourStrength), 1.0);
       
       // === STIPPLING WITH SLOPE VARIATION ===
       // Add stippling that varies with slope and lighting
@@ -138,27 +142,12 @@ export const OneBitShader = {
         // Blend stippling with base shading
         bit = mix(bit, bit * (0.4 + dotMask * 0.3), steepness * 0.8);
       }
-      
-      // === 2. SHADOW CASTING (Approximate) ===
-      // Simulate shadows from elevated terrain on flat surfaces
-      vec3 shadowDir = normalize(vec3(lightDirection.x, 0.0, lightDirection.z));
-      float shadowSampleDist = 2.0; // Distance to check for shadow casters
-      vec2 shadowPos = vWorldPosition.xz + shadowDir.xz * shadowSampleDist;
-      
-      // Approximate terrain height at shadow position using noise pattern
-      float shadowNoise = noise(shadowPos * 0.05) * 18.0; // Match terrain scale
-      float shadowMountain = noise(shadowPos * 0.005);
-      if (shadowMountain > 0.4) {
-        shadowNoise += (shadowMountain - 0.4) * 25.0;
-      }
-      
-      // If shadow position is higher, cast shadow
-      float heightDiff = shadowNoise - vElevation;
-      float shadowAmount = smoothstep(0.5, 3.0, heightDiff) * 0.25; // Shadow strength
-      shadowAmount *= (1.0 - steepness); // Only on flat surfaces
-      bit = mix(bit, bit * (1.0 - shadowAmount), smoothstep(0.0, 0.2, bit)); // Don't darken already dark areas
-      
-      // === 3. PROCEDURAL GROUND TEXTURE ===
+
+      // Add a stable cliff-face darkening pass so drop-offs are readable from either camera side.
+      float cliffFace = smoothstep(0.35, 0.85, steepness);
+      bit = mix(bit, bit * 0.58, cliffFace * 0.7);
+
+      // === 2. PROCEDURAL GROUND TEXTURE ===
       // Add subtle rock/crack patterns on flatter surfaces
       if (steepness < 0.5) {
         // Multi-scale noise for ground detail
@@ -179,7 +168,7 @@ export const OneBitShader = {
         bit = mix(bit, bit * (1.0 - groundDetail), 0.7);
       }
       
-      // === 4. DIRECTIONAL HATCHING ===
+      // === 3. DIRECTIONAL HATCHING ===
       // Scan lines that follow terrain slope direction
       if (steepness < 0.6 && distanceFade > 0.2) {
         // Calculate slope direction from normal

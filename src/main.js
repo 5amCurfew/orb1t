@@ -18,6 +18,7 @@ class Game {
     this.cameraController = null;
     this.minimap = null;
     this.markers = []; // Store placed markers
+    this.sunLight = null;
     
     this.lastTime = 0;
     
@@ -76,11 +77,11 @@ class Game {
     this.viewportWidth = viewportWidth;
     this.viewportHeight = viewportHeight;
 
-    // Add lighting
-    this.setupLighting();
-
     // Create terrain
     this.terrain = new Terrain(this.scene, 1000);
+
+    // Add lighting
+    this.setupLighting();
 
     // Create character (pass camera for screen-relative movement)
     this.character = new Character(this.scene, this.terrain, this.camera);
@@ -103,22 +104,32 @@ class Game {
 
   setupLighting() {
     // Ambient light for overall illumination
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
     this.scene.add(ambientLight);
 
     // Directional light (sun) for shadows
-    const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    sunLight.position.set(50, 100, 30);
-    sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
-    sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = 500;
-    sunLight.shadow.camera.left = -100;
-    sunLight.shadow.camera.right = 100;
-    sunLight.shadow.camera.top = 100;
-    sunLight.shadow.camera.bottom = -100;
-    this.scene.add(sunLight);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    this.sunLight.position.set(90, 55, 45);
+    this.sunLight.target.position.set(0, 0, 0);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.width = 2048;
+    this.sunLight.shadow.mapSize.height = 2048;
+    this.sunLight.shadow.camera.near = 0.5;
+    this.sunLight.shadow.camera.far = 500;
+    this.sunLight.shadow.camera.left = -100;
+    this.sunLight.shadow.camera.right = 100;
+    this.sunLight.shadow.camera.top = 100;
+    this.sunLight.shadow.camera.bottom = -100;
+    this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
+
+    if (this.terrain) {
+      this.terrain.setLightDirection(this.getSunLightDirection());
+    }
+  }
+
+  getSunLightDirection() {
+    return this.sunLight.position.clone().sub(this.sunLight.target.position).normalize();
   }
 
   setupMarkerInput() {

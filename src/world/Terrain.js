@@ -44,6 +44,19 @@ class Terrain {
       transparent: true,
       side: THREE.DoubleSide
     });
+
+    this.rockMaterial = new THREE.MeshLambertMaterial({
+      color: 0x505050,
+      flatShading: true
+    });
+  }
+
+  setLightDirection(direction) {
+    this.terrainMaterial.uniforms.lightDirection.value.copy(direction);
+
+    for (const chunk of this.chunks.values()) {
+      chunk.mesh.material.uniforms.lightDirection.value.copy(direction);
+    }
   }
 
   /**
@@ -52,19 +65,20 @@ class Terrain {
   getTerrainHeight(x, z) {
     const elevation = this.noiseGen.getElevation(x, z);
     const moisture = this.noiseGen.getMoisture(x, z);
+    const detail = this.noiseGen.getNoise(x + 500, z + 500, 0.02, 3);
     
-    // More dramatic terrain
-    let height = elevation * 18; // Increased from 8
+    let height = elevation * 11 + detail * 2.5;
     
     // Reduce height near water sources for smooth transitions
     if (moisture > 0.3) {
-      height *= 0.5;
+      height *= 0.7;
     }
     
-    // Add dramatic mountainous regions
+    // Blend mountains in gradually so the landscape keeps variation without frequent cliffs.
     const mountains = this.noiseGen.getNoise(x, z, 0.005, 6);
-    if (mountains > 0.4) {
-      height += (mountains - 0.4) * 25; // More dramatic mountains
+    const mountainBlend = THREE.MathUtils.smoothstep(mountains, 0.45, 0.72);
+    if (mountainBlend > 0) {
+      height += mountainBlend * (mountains - 0.45) * 12;
     }
     
     return height;
@@ -95,6 +109,67 @@ class Terrain {
   getClimate(x, z) {
     const temp = this.noiseGen.getTemperature(x, z);
     return getClimateFromTemperature(temp);
+  }
+
+  getTerrainSlope(x, z, sampleDistance = 1.5) {
+    const centerHeight = this.getTerrainHeight(x, z);
+    const offsetHeightX = this.getTerrainHeight(x + sampleDistance, z);
+    const offsetHeightZ = this.getTerrainHeight(x, z + sampleDistance);
+
+    return Math.max(
+      Math.abs(offsetHeightX - centerHeight),
+      Math.abs(offsetHeightZ - centerHeight)
+    ) / sampleDistance;
+  }
+
+  generateRocks(chunkX, chunkZ, climate) {
+    if (climate !== CLIMATE_TYPES.STONE) {
+      return [];
+    }
+
+    const rocks = [];
+    const candidateCount = 7;
+
+    for (let index = 0; index < candidateCount; index++) {
+      const seedOffset = index * 19.37;
+      const scatter = this.noiseGen.getNoise(chunkX * 41.7 + seedOffset, chunkZ * 38.1 - seedOffset, 0.4, 2);
+      if (scatter < 0.18) {
+        continue;
+      }
+
+      const offsetX = (this.noiseGen.getNoise(chunkX * 17.3 + seedOffset, chunkZ * 13.1 + seedOffset, 0.8, 1) * 0.5 + 0.5) * this.chunkSize;
+      const offsetZ = (this.noiseGen.getNoise(chunkX * 11.9 - seedOffset, chunkZ * 23.7 + seedOffset, 0.8, 1) * 0.5 + 0.5) * this.chunkSize;
+      const worldX = chunkX * this.chunkSize + offsetX;
+      const worldZ = chunkZ * this.chunkSize + offsetZ;
+      const height = this.getTerrainHeight(worldX, worldZ);
+      const slope = this.getTerrainSlope(worldX, worldZ);
+
+      if (this.isWater(worldX, worldZ) || slope > 0.6 || height < this.waterLevel + 0.6) {
+        continue;
+      }
+
+      const radius = 0.45 + (scatter - 0.18) * 0.9;
+      const detail = scatter > 0.55 ? 1 : 0;
+      const rockGeometry = new THREE.DodecahedronGeometry(radius, detail);
+      const rockMesh = new THREE.Mesh(rockGeometry, this.rockMaterial);
+      rockMesh.position.set(worldX, height + radius * 0.7, worldZ);
+      rockMesh.rotation.set(
+        scatter * Math.PI * 0.35,
+        scatter * Math.PI * 1.7,
+        scatter * Math.PI * 0.2
+      );
+      rockMesh.scale.set(
+        0.9 + scatter * 0.45,
+        0.65 + scatter * 0.55,
+        0.85 + scatter * 0.5
+      );
+      rockMesh.castShadow = true;
+      rockMesh.receiveShadow = true;
+      this.scene.add(rockMesh);
+      rocks.push(rockMesh);
+    }
+
+    return rocks;
   }
 
   /**
@@ -154,7 +229,9 @@ class Terrain {
     // Grid removed - using enhanced shader-based terrain visualization
     // this.addContourLines(chunkX, chunkZ, geometry);
     
-    this.chunks.set(key, { mesh, climate });
+    const rocks = this.generateRocks(chunkX, chunkZ, climate);
+
+    this.chunks.set(key, { mesh, climate, rocks });
 
     // Water removed for now
   }
